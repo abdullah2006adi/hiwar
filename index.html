@@ -178,16 +178,39 @@ let editing = null;
 /* ---------- الكاميرا ---------- */
 let stream = null;
 async function startCam(){
-  if(stream) stream.getTracks().forEach(t=>t.stop());
-  stream = await navigator.mediaDevices.getUserMedia({video:{facingMode:settings.facing, width:{ideal:1920}, height:{ideal:1080}}, audio:false});
-  vid.srcObject = stream; await vid.play();
+  if(stream){ stream.getTracks().forEach(t=>t.stop()); stream = null; vid.srcObject = null; await new Promise(r=>setTimeout(r,300)); }
+  // نجرّب من الأدق إلى الأبسط، لأن Safari على الآيباد قد يرفض بعض الطلبات بخطأ AbortError
+  const tries = [
+    {video:{facingMode:{ideal:settings.facing}, width:{ideal:1280}, height:{ideal:720}}, audio:false},
+    {video:{facingMode:{ideal:settings.facing}}, audio:false},
+    {video:true, audio:false}
+  ];
+  let lastErr = null;
+  for(let round=0; round<2 && !stream; round++){
+    for(const c of tries){
+      try{ stream = await navigator.mediaDevices.getUserMedia(c); break; }
+      catch(e){ lastErr = e; if(e.name==='NotAllowedError') throw e; await new Promise(r=>setTimeout(r,400)); }
+    }
+    if(!stream) await new Promise(r=>setTimeout(r,1200));
+  }
+  if(!stream) throw lastErr;
+  vid.srcObject = stream;
+  try{ await vid.play(); }catch(e){}
   if(settings.facing==='user' && load('hiwar.settings',{}).mirror===undefined){ settings.mirror = true; $('#mirror').checked = true; }
 }
 $('#btnStart').onclick = async () => {
   initAudio();
   if(!navigator.mediaDevices?.getUserMedia){ $('#err').textContent = 'المتصفح لا يسمح بالكاميرا هنا. افتح الصفحة من رابط يبدأ بـ https في Safari.'; return; }
   try{ await startCam(); $('#start').hidden = true; wake(); if(settings.pick==='hand') getDetector(); }
-  catch(e){ $('#err').textContent = 'تعذّر فتح الكاميرا. اسمح لـ Safari باستخدام الكاميرا ثم أعد المحاولة. (' + e.name + ')'; }
+  catch(e){
+    const m = {
+      NotAllowedError:'رُفض إذن الكاميرا. اضغط رمز «aA» أو رمز الكاميرا بجانب العنوان ← إعدادات الموقع ← الكاميرا: سماح، ثم أعد تحميل الصفحة.',
+      AbortError:'الكاميرا مشغولة أو انقطع تشغيلها. أغلق أي تبويب أو تطبيق آخر يستخدم الكاميرا (FaceTime، Zoom، Teams، تبويب سابق لهذه الصفحة)، ثم أعد تحميل الصفحة واضغط الزر مرة أخرى.',
+      NotReadableError:'الكاميرا مستخدمة في تطبيق آخر. أغلقه ثم أعد المحاولة.',
+      NotFoundError:'لم يُعثر على كاميرا في هذا الجهاز.'
+    };
+    $('#err').textContent = (m[e.name] || 'تعذّر فتح الكاميرا. أعد تحميل الصفحة ثم حاول مرة أخرى.') + ' (' + e.name + ')';
+  }
 };
 $('#btnFlip').onclick = async () => { settings.facing = settings.facing==='user'?'environment':'user'; settings.mirror = settings.facing==='user'; $('#mirror').checked = settings.mirror; persist(); try{ await startCam(); }catch(e){ toast('تعذّر تبديل الكاميرا'); } };
 let lock = null;
